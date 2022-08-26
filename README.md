@@ -37,8 +37,15 @@ from machine import Pin, I2C
 import bma
 i2c = I2C(0, scl=Pin(22), sda=Pin(21),freq=400000)
 b = bma.BMA423(i2c, 25)
+
+# 配置使能三轴加速度
 b.accel_config(True, direction=b.LOWER_LEFT, layer=b.BOTTOM_LAYER)
 b.accel()
+
+# 使能步数统计
+b.step_config(True)
+# 读取步数
+b.step_counter()
 ```
 
 #### 构造
@@ -92,6 +99,14 @@ b.accel()
 ##### BMA423.clear()
 
 清除步数值。
+
+##### BMA423.step_config(enable)
+
+使能或者失能步数统计。
+
+##### BMA423.step_counter()
+
+读取步数。
 
 #### 常量
 
