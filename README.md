@@ -21,12 +21,25 @@ $ git clone https://github.com/liangyingy/bma_binding_micropython.git extmod/bma
 
 ```shell
 $ cd ports/esp32/
-$ make make USER_C_MODULES=../../../extmod/bma_binding_micropython/micropython.cmake
+$ make USER_C_MODULES=../../../extmod/bma_binding_micropython/micropython.cmake
 ```
 
 ## 使用指南
 
 ### class BMA423
+
+BMA423对象用于控制BMA423传感器。可以获取传感器的加速度值，计步数等。
+
+Usage Model:
+
+```python
+from machine import Pin, I2C
+import bma
+i2c = I2C(0, scl=Pin(22), sda=Pin(21),freq=400000)
+b = bma.BMA423(i2c, 25)
+b.accel_config(True, direction=b.LOWER_LEFT, layer=b.BOTTOM_LAYER)
+b.accel()
+```
 
 #### 构造
 
@@ -43,7 +56,7 @@ $ make make USER_C_MODULES=../../../extmod/bma_binding_micropython/micropython.c
 
 ##### BMA423.accel_config(enable, direction=LOWER_LEFT, layer=BOTTOM_LAYER)
 
-使能重力加速度，和配置传感器的位置信息。
+使能三轴加速度，和配置传感器的位置信息。
 
 | 参数 | 描述 |
 | --- | ---- |
@@ -74,11 +87,11 @@ $ make make USER_C_MODULES=../../../extmod/bma_binding_micropython/micropython.c
 
 ##### BMA423.reset()
 
-软件复位传感器
+软件复位传感器，所有的寄存器值恢复为默认值。但不清除步数值
 
 ##### BMA423.clear()
 
-清除传感器的加速度值和计步值。
+清除步数值。
 
 #### 常量
 
@@ -106,19 +119,9 @@ BMA423传感器Pin#1位于左上角
 
 BMA423传感器Pin#1位于右下角
 
-#### examples
-
-```python
-from machine import Pin, I2C
-import bma
-i2c = I2C(0, scl=Pin(22), sda=Pin(21),freq=400000)
-b = bma.BMA423(i2c, 25)
-b.accel_config(True, irection=LOWER_LEFT, layer=BOTTOM_LAYER)
-b.accel()
-```
-
 ## 开发计划
 
+- [x] 步数统计
 - [ ] 活动检测中断
 - [ ] 单击中断
 - [ ] 双击中断

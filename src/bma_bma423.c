@@ -137,7 +137,10 @@ STATIC mp_obj_t bma423_make_new(mp_obj_t i2c_in, mp_obj_t address_in) {
     self->bma423.read_write_len = 8;
     self->bma423.variant = BMA42X_VARIANT;
 
-    int8_t rslt = bma423_init(&self->bma423);
+    int8_t rslt = bma4_soft_reset(&self->bma423);
+    bma4_error_codes_print_result("bma4_soft_reset", rslt);
+
+    rslt = bma423_init(&self->bma423);
     bma4_error_codes_print_result("bma423_init", rslt);
 
     rslt = bma423_write_config_file(&self->bma423);
@@ -161,8 +164,8 @@ STATIC mp_obj_t accel_config(size_t n_args, const mp_obj_t *pos_args, mp_map_t *
     enum { ARG_enable, ARG_direction, ARG_layer };
     mp_arg_t accel_config_args[] = {
         { MP_QSTR_enable,    MP_ARG_REQUIRED | MP_ARG_BOOL, {.u_bool = false} },
-        { MP_QSTR_direction, MP_ARG_KW_ONLY | MP_ARG_INT,                    {.u_int = 0     } },
-        { MP_QSTR_layer,     MP_ARG_KW_ONLY | MP_ARG_INT,                    {.u_int = 1     } },
+        { MP_QSTR_direction, MP_ARG_KW_ONLY | MP_ARG_INT,   {.u_int = 0     } },
+        { MP_QSTR_layer,     MP_ARG_KW_ONLY | MP_ARG_INT,   {.u_int = 1     } },
     };
     struct bma423_axes_remap remap;
     mp_arg_val_t args[MP_ARRAY_SIZE(accel_config_args)];
@@ -541,9 +544,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(reset_obj, reset);
 
 STATIC mp_obj_t clear(mp_obj_t self_in) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    int8_t rslt;
 
-    int8_t rslt = bma4_soft_reset(&self->bma423);
-    bma4_error_codes_print_result("bma4_soft_reset", rslt);
+    // int8_t rslt = bma4_soft_reset(&self->bma423);
+    // bma4_error_codes_print_result("bma4_soft_reset", rslt);
 
     rslt = bma423_reset_step_counter(&self->bma423);
     bma4_error_codes_print_result("bma423_reset_step_counter", rslt);
@@ -558,36 +562,25 @@ STATIC mp_obj_t step_config(mp_obj_t self_in, mp_obj_t enable_in) {
     int8_t rslt;
     struct bma4_accel_config accel_conf;
 
-    /* Accelerometer Configuration Setting */
-    /* Output data Rate */
+    /* Enable the accelerometer */
+    rslt = bma4_set_accel_enable(1, &self->bma423);
+    bma4_error_codes_print_result("bma4_set_accel_enable", rslt);
+
     accel_conf.odr = BMA4_OUTPUT_DATA_RATE_100HZ;
-
-    /* Gravity range of the sensor (+/- 2G, 4G, 8G, 16G) */
     accel_conf.range = BMA4_ACCEL_RANGE_2G;
-
-    /* Bandwidth configure number of sensor samples required to average
-     * if value = 2, then 4 samples are averaged
-     * averaged samples = 2^(val(accel bandwidth))
-     * Note1 : More info refer datasheets
-     * Note2 : A higher number of averaged samples will result in a lower noise level of the signal, but since the
-     * performance power mode phase is increased, the power consumption will also rise.
-     */
     accel_conf.bandwidth = BMA4_ACCEL_NORMAL_AVG4;
-
-    /* Enable the filter performance mode where averaging of samples
-     * will be done based on above set bandwidth and ODR.
-     * There are two modes
-     *  0 -> Averaging samples (Default)
-     *  1 -> No averaging
-     * For more info on No Averaging mode refer datasheets.
-     */
     accel_conf.perf_mode = BMA4_CIC_AVG_MODE;
-
     rslt = bma4_set_accel_config(&accel_conf, &self->bma423);
     bma4_error_codes_print_result("bma4_set_accel_config", rslt);
 
     rslt = bma423_feature_enable(BMA423_STEP_CNTR, mp_obj_is_true(enable_in), &self->bma423);
     bma4_error_codes_print_result("bma423_feature_enable", rslt);
+
+    rslt = bma423_step_counter_set_watermark(1, &self->bma423);
+    bma4_error_codes_print_result("bma423_step_counter status", rslt);
+
+    rslt = bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT, 1, &self->bma423);
+    bma4_error_codes_print_result("bma423_map_interrupt status", rslt);
 
     return mp_const_none;
 }
@@ -597,45 +590,80 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(step_config_obj, step_config);
 STATIC mp_obj_t step_counter(mp_obj_t self_in) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t step_count = 0;
+    // uint16_t int_status = 0;
 
-    int8_t rslt = bma423_step_counter_output(&step_count, &self->bma423);
-    bma4_error_codes_print_result("bma4_soft_reset", rslt);
+    // int8_t rslt = bma423_read_int_status(&int_status, &self->bma423);
+    // bma4_error_codes_print_result("bma423_read_int_status", rslt);
+    // if (int_status & BMA423_STEP_CNTR_INT) {
+    rslt = bma423_step_counter_output(&step_count, &self->bma423);
+    bma4_error_codes_print_result("bma423_step_counter_output", rslt);
+    // }
 
     return mp_obj_new_int(step_count);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(step_counter_obj, step_counter);
 
 
+STATIC mp_obj_t activity(mp_obj_t self_in, mp_obj_t handler) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+    mp_sched_schedule(handler, mp_const_none);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(activity_obj, activity);
+
+
+STATIC mp_obj_t single_tap(mp_obj_t self_in, mp_obj_t handler) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+    mp_sched_schedule(handler, mp_const_none);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(single_tap_obj, single_tap);
+
+
+STATIC mp_obj_t double_tap(mp_obj_t self_in, mp_obj_t handler) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+    mp_sched_schedule(handler, mp_const_none);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(double_tap_obj, double_tap);
+
+
 STATIC const mp_rom_map_elem_t bma423_if_locals_dict_table[] = {
     // method
-    { MP_ROM_QSTR(MP_QSTR___del__),        MP_ROM_PTR(&delete_obj)           },
-    { MP_ROM_QSTR(MP_QSTR_deinit),         MP_ROM_PTR(&delete_obj)           },
-    { MP_ROM_QSTR(MP_QSTR_accel_config),   MP_ROM_PTR(&accel_config_obj)     },
-    { MP_ROM_QSTR(MP_QSTR_accel),          MP_ROM_PTR(&accel_read_obj)       },
-    { MP_ROM_QSTR(MP_QSTR_x),              MP_ROM_PTR(&accel_read_x_obj)     },
-    { MP_ROM_QSTR(MP_QSTR_y),              MP_ROM_PTR(&accel_read_y_obj)     },
-    { MP_ROM_QSTR(MP_QSTR_z),              MP_ROM_PTR(&accel_read_z_obj)     },
-    { MP_ROM_QSTR(MP_QSTR_temperature),    MP_ROM_PTR(&temperature_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_reset),          MP_ROM_PTR(&reset_obj)            },
-    { MP_ROM_QSTR(MP_QSTR_clear),          MP_ROM_PTR(&clear_obj)            },
-    // todo
-    { MP_ROM_QSTR(MP_QSTR_step_config),    MP_ROM_PTR(&step_config_obj)      },
-    { MP_ROM_QSTR(MP_QSTR_step_counter),   MP_ROM_PTR(&step_counter_obj)     },
+    { MP_ROM_QSTR(MP_QSTR___del__),      MP_ROM_PTR(&delete_obj)           },
+    { MP_ROM_QSTR(MP_QSTR_deinit),       MP_ROM_PTR(&delete_obj)           },
+    { MP_ROM_QSTR(MP_QSTR_accel_config), MP_ROM_PTR(&accel_config_obj)     },
+    { MP_ROM_QSTR(MP_QSTR_accel),        MP_ROM_PTR(&accel_read_obj)       },
+    { MP_ROM_QSTR(MP_QSTR_x),            MP_ROM_PTR(&accel_read_x_obj)     },
+    { MP_ROM_QSTR(MP_QSTR_y),            MP_ROM_PTR(&accel_read_y_obj)     },
+    { MP_ROM_QSTR(MP_QSTR_z),            MP_ROM_PTR(&accel_read_z_obj)     },
+    { MP_ROM_QSTR(MP_QSTR_temperature),  MP_ROM_PTR(&temperature_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reset),        MP_ROM_PTR(&reset_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_clear),        MP_ROM_PTR(&clear_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_step_config),  MP_ROM_PTR(&step_config_obj)      },
+    { MP_ROM_QSTR(MP_QSTR_step_counter), MP_ROM_PTR(&step_counter_obj)     },
     // todo: activity recognition
     // todo: single tap
     // todo: double tap
-    // { MP_ROM_QSTR(MP_QSTR_activity_irq),   MP_ROM_PTR(activity_irq_obj)      },
-    // { MP_ROM_QSTR(MP_QSTR_single_tap_irq), MP_ROM_PTR(single_tap_irq_obj)    },
-    // { MP_ROM_QSTR(MP_QSTR_double_tap_irq), MP_ROM_PTR(double_tap_irq_obj)    },
+    { MP_ROM_QSTR(MP_QSTR_activity),     MP_ROM_PTR(&activity_obj)         },
+    { MP_ROM_QSTR(MP_QSTR_single_tap),   MP_ROM_PTR(&single_tap_obj)       },
+    { MP_ROM_QSTR(MP_QSTR_double_tap),   MP_ROM_PTR(&double_tap_obj)       },
 
-    { MP_ROM_QSTR(MP_QSTR_BOTTOM_LAYER),   MP_ROM_INT(0)                     },
-    { MP_ROM_QSTR(MP_QSTR_TOP_LAYER),      MP_ROM_INT(1)                     },
-    { MP_ROM_QSTR(MP_QSTR_UPPER_RIGHT),    MP_ROM_INT(0)                     },
-    { MP_ROM_QSTR(MP_QSTR_LOWER_LEFT),     MP_ROM_INT(1)                     },
-    { MP_ROM_QSTR(MP_QSTR_UPPER_LEFT),     MP_ROM_INT(2)                     },
-    { MP_ROM_QSTR(MP_QSTR_LOWER_RIGHT),    MP_ROM_INT(3)                     },
+    { MP_ROM_QSTR(MP_QSTR_BOTTOM_LAYER), MP_ROM_INT(0)                     },
+    { MP_ROM_QSTR(MP_QSTR_TOP_LAYER),    MP_ROM_INT(1)                     },
+    { MP_ROM_QSTR(MP_QSTR_UPPER_RIGHT),  MP_ROM_INT(0)                     },
+    { MP_ROM_QSTR(MP_QSTR_LOWER_LEFT),   MP_ROM_INT(1)                     },
+    { MP_ROM_QSTR(MP_QSTR_UPPER_LEFT),   MP_ROM_INT(2)                     },
+    { MP_ROM_QSTR(MP_QSTR_LOWER_RIGHT),  MP_ROM_INT(3)                     },
 };
 STATIC MP_DEFINE_CONST_DICT(bma423_if_locals_dict, bma423_if_locals_dict_table);
+
 
 const mp_obj_type_t bma423_if_type = {
     { &mp_type_type },
