@@ -11,4 +11,8 @@ if(NOT EXISTS ${CMAKE_CURRENT_LIST_DIR}/lib/BMA423-Sensor-API)
                         git clone ${url}
                     WORKING_DIRECTORY
                         ${CMAKE_CURRENT_LIST_DIR}/lib)
+    execute_process(COMMAND
+                        git checkout ${commit}
+                    WORKING_DIRECTORY
+                        ${CMAKE_CURRENT_LIST_DIR}/lib/BMA423-Sensor-API)
 endif()
