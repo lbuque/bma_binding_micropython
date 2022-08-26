@@ -590,6 +590,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(step_config_obj, step_config);
 STATIC mp_obj_t step_counter(mp_obj_t self_in) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t step_count = 0;
+    int8_t rslt;
     // uint16_t int_status = 0;
 
     // int8_t rslt = bma423_read_int_status(&int_status, &self->bma423);
