@@ -11,16 +11,21 @@
 #include <ctype.h>
 #include <sys/time.h>
 
-// static struct bma4_dev bma423;
-// static uint8_t address;
-// mp_obj_t i2c_obj;
-
 typedef struct bma423_if_obj_t {
     mp_obj_base_t base;
     mp_obj_t i2c_obj;
     uint8_t address;
     struct bma4_dev bma423;
     uint8_t remap_axes;
+    mp_obj_t int_obj[2];
+    struct
+    {
+        mp_obj_t activity_handler;
+        mp_obj_t single_tap_handler;
+        mp_obj_t double_tap_handler;
+        mp_obj_t wrist_wear_handler;
+    } int_handler[2];
+    uint16_t int_map;
 } bma423_if_obj_t;
 
 const mp_obj_type_t bma423_if_type;
@@ -40,7 +45,6 @@ const mp_obj_type_t bma423_if_type;
 static float lsb_to_ms2(int16_t val, float g_range, uint8_t bit_width)
 {
     float half_scale = (float)(1 << bit_width) / 2.0f;
-
     return GRAVITY_EARTH * val * g_range / half_scale;
 }
 
@@ -52,18 +56,16 @@ static int8_t i2c_bus_read(uint8_t reg, uint8_t *data, uint32_t len, void *intf_
     size_t l = 0;
     bma423_if_obj_t *self = (bma423_if_obj_t *)intf_ptr;
 
-    mp_printf(&mp_plat_print, "i2c read (address=%d, reg=0x%x, len=%d)\r\n", self->address, reg, len);
+    // mp_printf(&mp_plat_print, "i2c read (address=%d, reg=0x%x, len=%d)\r\n", self->address, reg, len);
 
     args[0] = mp_obj_new_int(self->address);
     args[1] = mp_obj_new_int(reg);
     args[2] = mp_obj_new_int(len);
 
     mp_load_method_maybe(self->i2c_obj, MP_QSTR_readfrom_mem, dest);
-    if (mp_obj_is_callable(dest[0])) {
-        ret = mp_call_method_self_n_kw(dest[0], dest[1], 3, 0, args);
-        buf = mp_obj_str_get_data(ret, &l);
-        memcpy(data, buf, l);
-    }
+    ret = mp_call_method_self_n_kw(dest[0], dest[1], 3, 0, args);
+    buf = mp_obj_str_get_data(ret, &l);
+    memcpy(data, buf, l);
     return 0;
 }
 
@@ -73,16 +75,14 @@ static int8_t i2c_bus_write(uint8_t reg, const uint8_t *data, uint32_t len, void
     mp_obj_t args[3];
     bma423_if_obj_t *self = (bma423_if_obj_t *)intf_ptr;
 
-    mp_printf(&mp_plat_print, "i2c write (address=%d, reg=0x%x, len=%d)\r\n", self->address, reg, len);
+    // mp_printf(&mp_plat_print, "i2c write (address=%d, reg=0x%x, len=%d)\r\n", self->address, reg, len);
 
     args[0] = mp_obj_new_int(self->address);
     args[1] = mp_obj_new_int(reg);
     args[2] = mp_obj_new_bytes(data, len);
 
     mp_load_method_maybe(self->i2c_obj, MP_QSTR_writeto_mem, dest);
-    if (mp_obj_is_callable(dest[0])) {
-        mp_call_method_self_n_kw(dest[0], dest[1], 3, 0, args);
-    }
+    mp_call_method_self_n_kw(dest[0], dest[1], 3, 0, args);
     return 0;
 }
 
@@ -112,8 +112,112 @@ static void bma4_error_codes_print_result(const char api_name[], uint16_t rslt) 
     }
 }
 
+typedef struct bma423_binding_int
+{
+    mp_obj_t pin_obj;
+    bma423_if_obj_t *bma423_obj;
+} bma423_binding_int;
+static bma423_binding_int *bma423_binding_int_tables;
+static int bma423_binding_int_tables_num = 0;
 
-STATIC mp_obj_t bma423_make_new(mp_obj_t i2c_in, mp_obj_t address_in) {
+void store_iterm(mp_obj_t pin_obj, bma423_if_obj_t *bma423_obj) {
+    for (size_t i = 0; i < bma423_binding_int_tables_num; i++) {
+        if (bma423_binding_int_tables[i].pin_obj == MP_OBJ_NULL) {
+            // mp_printf(&mp_plat_print, "store_iterm\r\n");
+            bma423_binding_int_tables[i].pin_obj = pin_obj;
+            bma423_binding_int_tables[i].bma423_obj = bma423_obj;
+        }
+    }
+}
+
+bma423_if_obj_t* load_iterm(mp_obj_t pin_obj) {
+    for (size_t i = 0; i < bma423_binding_int_tables_num; i++) {
+        if (bma423_binding_int_tables[i].pin_obj == pin_obj) {
+            // mp_printf(&mp_plat_print, "load_iterm\r\n");
+            return bma423_binding_int_tables[i].bma423_obj;
+        }
+    }
+    return MP_OBJ_NULL;
+}
+
+
+mp_obj_t irq_handler(mp_obj_t self_in) {
+    bma423_if_obj_t *bma423_obj = load_iterm(self_in);
+    uint16_t int_status;
+    uint8_t activity_out = 0;
+    uint8_t int_line = 0;
+
+    if (bma423_obj->int_obj[0] == self_in) {
+        int_line = 0;
+    } else {
+        int_line = 1;
+    }
+
+    int8_t rslt = bma423_read_int_status(&int_status, &bma423_obj->bma423);
+    bma4_error_codes_print_result("bma423_read_int_status", rslt);
+    if (BMA4_OK == rslt) {
+        if (int_status & BMA423_SINGLE_TAP_INT) {
+            // mp_printf(&mp_plat_print, "Single tap received\n");
+            if (bma423_obj->int_handler[int_line].single_tap_handler != MP_OBJ_NULL) {
+                mp_sched_schedule(bma423_obj->int_handler[int_line].single_tap_handler, mp_const_none);
+            }
+        } else if (int_status & BMA423_DOUBLE_TAP_INT) {
+            // mp_printf(&mp_plat_print, "Double tap received\n");
+            if (bma423_obj->int_handler[int_line].double_tap_handler != MP_OBJ_NULL) {
+                mp_sched_schedule(bma423_obj->int_handler[int_line].double_tap_handler, mp_const_none);
+            }
+        } else if (int_status & BMA423_WRIST_WEAR_INT) {
+            // mp_printf(&mp_plat_print, "Wrist wear received\n");
+            if (bma423_obj->int_handler[int_line].wrist_wear_handler != MP_OBJ_NULL) {
+                mp_sched_schedule(bma423_obj->int_handler[int_line].wrist_wear_handler, mp_const_none);
+            }
+        } else if (int_status & BMA423_ACTIVITY_INT) {
+            /* Read activity output register for recognizing specific activity */
+            rslt = bma423_activity_output(&activity_out, &bma423_obj->bma423);
+            bma4_error_codes_print_result("bma423_activity_output", rslt);
+            #if 0
+            switch (activity_out) {
+                case BMA423_USER_STATIONARY:
+                    mp_printf(&mp_plat_print, "User is stationary\n");
+                    break;
+                case BMA423_USER_WALKING:
+                    mp_printf(&mp_plat_print, "User is walking\n");
+                    break;
+                case BMA423_USER_RUNNING:
+                    mp_printf(&mp_plat_print, "User is running\n");
+                    break;
+                case BMA423_STATE_INVALID:
+                    mp_printf(&mp_plat_print, "Invalid activity recognized\n");
+                    break;
+                default:
+                    break;
+            }
+            #endif
+            if (bma423_obj->int_handler[int_line].activity_handler != MP_OBJ_NULL) {
+                mp_sched_schedule(bma423_obj->int_handler[int_line].activity_handler, mp_obj_new_int(activity_out));
+            }
+        }
+    }
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(irq_handler_obj, irq_handler);
+
+
+STATIC mp_obj_t bma423_make_new(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_i2c, ARG_address, ARG_int1, ARG_int2, ARG_debug};
+    mp_arg_t make_new_args[] = {
+        { MP_QSTR_i2c,     MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL}           },
+        { MP_QSTR_address, MP_ARG_KW_ONLY | MP_ARG_INT,  {.u_int = BMA4_I2C_ADDR_PRIMARY} },
+        { MP_QSTR_int1,    MP_ARG_KW_ONLY | MP_ARG_OBJ,  {.u_obj = MP_OBJ_NULL}           },
+        { MP_QSTR_int2,    MP_ARG_KW_ONLY | MP_ARG_OBJ,  {.u_obj = MP_OBJ_NULL}           },
+        { MP_QSTR_debug,  MP_ARG_KW_ONLY | MP_ARG_OBJ,   {.u_bool = false}                },
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(make_new_args)];
+    mp_arg_parse_all(n_args , pos_args, kw_args, MP_ARRAY_SIZE(make_new_args),
+                     make_new_args, args);
+
     bma423_if_obj_t *self = m_new_obj_with_finaliser(bma423_if_obj_t);
     if (!self) {
         mp_raise_TypeError(MP_ERROR_TEXT("malloc fail"));
@@ -122,12 +226,14 @@ STATIC mp_obj_t bma423_make_new(mp_obj_t i2c_in, mp_obj_t address_in) {
 
     self->base.type = &bma423_if_type;
 
-    self->i2c_obj = MP_OBJ_FROM_PTR(i2c_in);
+    self->i2c_obj = MP_OBJ_FROM_PTR(args[ARG_i2c].u_obj);
     if (self->i2c_obj == mp_const_none) {
         mp_raise_ValueError("must assignation i2c port");
         return mp_const_none;
     }
-    self->address = mp_obj_get_int(address_in);
+    self->address = args[ARG_address].u_int;
+    self->int_obj[0] = args[ARG_int1].u_obj;
+    self->int_obj[1] = args[ARG_int2].u_obj;
 
     self->bma423.intf_ptr = self;
     self->bma423.intf = BMA4_I2C_INTF;
@@ -144,11 +250,75 @@ STATIC mp_obj_t bma423_make_new(mp_obj_t i2c_in, mp_obj_t address_in) {
     bma4_error_codes_print_result("bma423_init", rslt);
 
     rslt = bma423_write_config_file(&self->bma423);
-    bma4_error_codes_print_result("bma4_write_config", rslt);
+    bma4_error_codes_print_result("bma423_write_config_file", rslt);
+
+    mp_obj_t dest[2];
+    mp_obj_t args1[3];
+    if (self->int_obj[0] != MP_OBJ_NULL) {
+        // init
+        args1[0] = mp_load_attr(self->int_obj[0], MP_QSTR_IN);
+        mp_load_method_maybe(self->int_obj[0], MP_QSTR_init, dest);
+        mp_call_method_self_n_kw(dest[0], dest[1], 1, 0, args1);
+
+        if (MP_OBJ_NULL == bma423_binding_int_tables) {
+            bma423_binding_int_tables = (bma423_binding_int *)m_malloc(sizeof(bma423_binding_int));
+            bma423_binding_int_tables_num += 1;
+        } else {
+            bma423_binding_int_tables = m_realloc(bma423_binding_int_tables, (bma423_binding_int_tables_num + 1) * sizeof(bma423_binding_int));
+            bma423_binding_int_tables_num += 1;
+        }
+        store_iterm(self->int_obj[0], self);
+
+        // irq
+        args1[0] = MP_ROM_PTR(&irq_handler_obj);
+        args1[1] = mp_load_attr(self->int_obj[0], MP_QSTR_IRQ_RISING);
+        mp_load_method_maybe(self->int_obj[0], MP_QSTR_irq, dest);
+        mp_call_method_self_n_kw(dest[0], dest[1], 2, 0, args1);
+
+        struct bma4_int_pin_config config ;
+        config.edge_ctrl = BMA4_LEVEL_TRIGGER;
+        config.lvl = BMA4_ACTIVE_HIGH;
+        config.od = BMA4_PUSH_PULL;
+        config.output_en = BMA4_OUTPUT_ENABLE;
+        config.input_en = BMA4_INPUT_DISABLE;
+        rslt = bma4_set_int_pin_config(&config, BMA4_INTR1_MAP, &self->bma423);
+        bma4_error_codes_print_result("bma4_set_int_pin_config", rslt);
+    }
+
+    if (self->int_obj[1] != MP_OBJ_NULL) {
+        // init
+        args1[0] = mp_load_attr(self->int_obj[1], MP_QSTR_IN);
+        mp_load_method_maybe(self->int_obj[1], MP_QSTR_init, dest);
+        mp_call_method_self_n_kw(dest[0], dest[1], 1, 0, args1);
+
+        if (MP_OBJ_NULL == bma423_binding_int_tables) {
+            bma423_binding_int_tables = (bma423_binding_int *)m_malloc(sizeof(bma423_binding_int));
+            bma423_binding_int_tables_num += 1;
+        } else {
+            bma423_binding_int_tables = m_realloc(bma423_binding_int_tables, (bma423_binding_int_tables_num + 1) * sizeof(bma423_binding_int));
+            bma423_binding_int_tables_num += 1;
+        }
+        store_iterm(self->int_obj[1], self);
+
+        // irq
+        args1[0] = MP_ROM_PTR(&irq_handler_obj);
+        args1[1] = mp_load_attr(self->int_obj[1], MP_QSTR_IRQ_RISING);
+        mp_load_method_maybe(self->int_obj[1], MP_QSTR_irq, dest);
+        mp_call_method_self_n_kw(dest[0], dest[1], 2, 0, args1);
+
+        struct bma4_int_pin_config config ;
+        config.edge_ctrl = BMA4_LEVEL_TRIGGER;
+        config.lvl = BMA4_ACTIVE_HIGH;
+        config.od = BMA4_PUSH_PULL;
+        config.output_en = BMA4_OUTPUT_ENABLE;
+        config.input_en = BMA4_INPUT_DISABLE;
+        rslt = bma4_set_int_pin_config(&config, BMA4_INTR1_MAP, &self->bma423);
+        bma4_error_codes_print_result("bma4_set_int_pin_config", rslt);
+    }
 
     return MP_OBJ_FROM_PTR(self);
 }
-MP_DEFINE_CONST_FUN_OBJ_2(bma423_make_new_obj, bma423_make_new);
+MP_DEFINE_CONST_FUN_OBJ_KW(bma423_make_new_obj, 1, bma423_make_new);
 
 
 mp_obj_t delete(mp_obj_t self_in) {
@@ -576,11 +746,11 @@ STATIC mp_obj_t step_config(mp_obj_t self_in, mp_obj_t enable_in) {
     rslt = bma423_feature_enable(BMA423_STEP_CNTR, mp_obj_is_true(enable_in), &self->bma423);
     bma4_error_codes_print_result("bma423_feature_enable", rslt);
 
-    rslt = bma423_step_counter_set_watermark(1, &self->bma423);
-    bma4_error_codes_print_result("bma423_step_counter status", rslt);
+    // rslt = bma423_step_counter_set_watermark(1, &self->bma423);
+    // bma4_error_codes_print_result("bma423_step_counter status", rslt);
 
-    rslt = bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT, 1, &self->bma423);
-    bma4_error_codes_print_result("bma423_map_interrupt status", rslt);
+    // rslt = bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT, 1, &self->bma423);
+    // bma4_error_codes_print_result("bma423_map_interrupt status", rslt);
 
     return mp_const_none;
 }
@@ -591,48 +761,139 @@ STATIC mp_obj_t step_counter(mp_obj_t self_in) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t step_count = 0;
     int8_t rslt;
-    // uint16_t int_status = 0;
 
-    // int8_t rslt = bma423_read_int_status(&int_status, &self->bma423);
-    // bma4_error_codes_print_result("bma423_read_int_status", rslt);
-    // if (int_status & BMA423_STEP_CNTR_INT) {
     rslt = bma423_step_counter_output(&step_count, &self->bma423);
     bma4_error_codes_print_result("bma423_step_counter_output", rslt);
-    // }
 
     return mp_obj_new_int(step_count);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(step_counter_obj, step_counter);
 
 
-STATIC mp_obj_t activity(mp_obj_t self_in, mp_obj_t handler) {
-    bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+enum { ARG_handler, ARG_int_line};
+static mp_arg_t handler_args[] = {
+    { MP_QSTR_handler,  MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+    { MP_QSTR_int_line, MP_ARG_KW_ONLY | MP_ARG_INT,  {.u_int = 1}           },
+};
 
-    mp_sched_schedule(handler, mp_const_none);
+STATIC mp_obj_t activity(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    int8_t rslt;
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
+                     handler_args, args);
+
+    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
+        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+            /* set activity handler */
+            self->int_handler[args[ARG_int_line - 1].u_int].activity_handler = args[ARG_handler].u_obj;
+            /* Enable activity feature */
+            rslt = bma423_feature_enable(BMA423_STEP_ACT, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_feature_enable", rslt);
+            self->int_map |= BMA423_ACTIVITY_INT;
+            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_map_interrupt", rslt);
+        } else {
+            mp_raise_ValueError("Interrupt not enabled");
+        }
+    } else {
+        mp_raise_ValueError("only accepts 0 or 1");
+    }
 
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(activity_obj, activity);
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(activity_obj, 2, activity);
 
 
-STATIC mp_obj_t single_tap(mp_obj_t self_in, mp_obj_t handler) {
-    bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+STATIC mp_obj_t single_tap(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    int8_t rslt;
 
-    mp_sched_schedule(handler, mp_const_none);
+    mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
+                     handler_args, args);
+
+    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
+        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+            /* set irq handler */
+            self->int_handler[args[ARG_int_line - 1].u_int].single_tap_handler = args[ARG_handler].u_obj;
+            /* Enable single tap feature */
+            rslt = bma423_feature_enable(BMA423_SINGLE_TAP, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_feature_enable", rslt);
+            self->int_map |= BMA423_SINGLE_TAP_INT;
+            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_map_interrupt", rslt);
+        } else {
+            mp_raise_ValueError("Interrupt not enabled");
+        }
+    } else {
+        mp_raise_ValueError("only accepts 0 or 1");
+    }
 
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(single_tap_obj, single_tap);
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(single_tap_obj, 2, single_tap);
 
 
-STATIC mp_obj_t double_tap(mp_obj_t self_in, mp_obj_t handler) {
-    bma423_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+STATIC mp_obj_t double_tap(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    int8_t rslt;
 
-    mp_sched_schedule(handler, mp_const_none);
+    mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
+                     handler_args, args);
+
+    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
+        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+            /* set irq handler */
+            self->int_handler[args[ARG_int_line - 1].u_int].double_tap_handler = args[ARG_handler].u_obj;
+            /* Enable double tap feature */
+            rslt = bma423_feature_enable(BMA423_DOUBLE_TAP, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_feature_enable", rslt);
+            self->int_map |= BMA423_DOUBLE_TAP_INT;
+            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_map_interrupt", rslt);
+        } else {
+            mp_raise_ValueError("Interrupt not enabled");
+        }
+    } else {
+        mp_raise_ValueError("only accepts 0 or 1");
+    }
 
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(double_tap_obj, double_tap);
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(double_tap_obj, 2, double_tap);
+
+
+STATIC mp_obj_t wrist_wear(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    int8_t rslt;
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
+                     handler_args, args);
+
+    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
+        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+            /* set irq handler */
+            self->int_handler[args[ARG_int_line - 1].u_int].wrist_wear_handler = args[ARG_handler].u_obj;
+            /* Enable double tap feature */
+            rslt = bma423_feature_enable(BMA423_WRIST_WEAR, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_feature_enable", rslt);
+            self->int_map |= BMA423_WRIST_WEAR_INT;
+            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            bma4_error_codes_print_result("bma423_map_interrupt", rslt);
+        } else {
+            mp_raise_ValueError("Interrupt not enabled");
+        }
+    } else {
+        mp_raise_ValueError("only accepts 0 or 1");
+    }
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(wrist_wear_obj, 2, wrist_wear);
 
 
 STATIC const mp_rom_map_elem_t bma423_if_locals_dict_table[] = {
@@ -649,12 +910,10 @@ STATIC const mp_rom_map_elem_t bma423_if_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_clear),        MP_ROM_PTR(&clear_obj)            },
     { MP_ROM_QSTR(MP_QSTR_step_config),  MP_ROM_PTR(&step_config_obj)      },
     { MP_ROM_QSTR(MP_QSTR_step_counter), MP_ROM_PTR(&step_counter_obj)     },
-    // todo: activity recognition
-    // todo: single tap
-    // todo: double tap
     { MP_ROM_QSTR(MP_QSTR_activity),     MP_ROM_PTR(&activity_obj)         },
     { MP_ROM_QSTR(MP_QSTR_single_tap),   MP_ROM_PTR(&single_tap_obj)       },
     { MP_ROM_QSTR(MP_QSTR_double_tap),   MP_ROM_PTR(&double_tap_obj)       },
+    { MP_ROM_QSTR(MP_QSTR_wrist_wear),   MP_ROM_PTR(&wrist_wear_obj)       },
 
     { MP_ROM_QSTR(MP_QSTR_BOTTOM_LAYER), MP_ROM_INT(0)                     },
     { MP_ROM_QSTR(MP_QSTR_TOP_LAYER),    MP_ROM_INT(1)                     },
@@ -662,6 +921,8 @@ STATIC const mp_rom_map_elem_t bma423_if_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_LOWER_LEFT),   MP_ROM_INT(1)                     },
     { MP_ROM_QSTR(MP_QSTR_UPPER_LEFT),   MP_ROM_INT(2)                     },
     { MP_ROM_QSTR(MP_QSTR_LOWER_RIGHT),  MP_ROM_INT(3)                     },
+    { MP_ROM_QSTR(MP_QSTR_INT1),         MP_ROM_INT(1)                     },
+    { MP_ROM_QSTR(MP_QSTR_INT2),         MP_ROM_INT(2)                     },
 };
 STATIC MP_DEFINE_CONST_DICT(bma423_if_locals_dict, bma423_if_locals_dict_table);
 
