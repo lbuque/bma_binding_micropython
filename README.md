@@ -4,6 +4,10 @@
 
 - BMA423
 
+## 验证与测试
+
+- [LILYGO T-Watch](bin/micropython-esp32-v1.19.bin)
+
 ## 编译指南
 
 1. 获取源码
