@@ -779,26 +779,29 @@ static mp_arg_t handler_args[] = {
 STATIC mp_obj_t activity(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     int8_t rslt;
+    uint8_t int_line;
 
     mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
                      handler_args, args);
 
-    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
-        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+    int_line = args[ARG_int_line].u_int - 1;
+
+    if (0 == int_line || 1 == int_line) {
+        if (self->int_obj[int_line] != MP_OBJ_NULL) {
             /* set activity handler */
-            self->int_handler[args[ARG_int_line - 1].u_int].activity_handler = args[ARG_handler].u_obj;
+            self->int_handler[int_line].activity_handler = args[ARG_handler].u_obj;
             /* Enable activity feature */
             rslt = bma423_feature_enable(BMA423_STEP_ACT, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_feature_enable", rslt);
             self->int_map |= BMA423_ACTIVITY_INT;
-            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            rslt = bma423_map_interrupt(int_line, self->int_map, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_map_interrupt", rslt);
         } else {
             mp_raise_ValueError("Interrupt not enabled");
         }
     } else {
-        mp_raise_ValueError("only accepts 0 or 1");
+        mp_raise_ValueError("only accepts 1 or 2");
     }
 
     return mp_const_none;
@@ -809,26 +812,29 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(activity_obj, 2, activity);
 STATIC mp_obj_t single_tap(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     int8_t rslt;
+    uint8_t int_line;
 
     mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
                      handler_args, args);
 
-    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
-        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+    int_line = args[ARG_int_line].u_int - 1;
+
+    if (0 == int_line || 1 == int_line) {
+        if (self->int_obj[int_line] != MP_OBJ_NULL) {
             /* set irq handler */
-            self->int_handler[args[ARG_int_line - 1].u_int].single_tap_handler = args[ARG_handler].u_obj;
+            self->int_handler[int_line].single_tap_handler = args[ARG_handler].u_obj;
             /* Enable single tap feature */
             rslt = bma423_feature_enable(BMA423_SINGLE_TAP, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_feature_enable", rslt);
             self->int_map |= BMA423_SINGLE_TAP_INT;
-            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            rslt = bma423_map_interrupt(int_line, self->int_map, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_map_interrupt", rslt);
         } else {
             mp_raise_ValueError("Interrupt not enabled");
         }
     } else {
-        mp_raise_ValueError("only accepts 0 or 1");
+        mp_raise_ValueError("only accepts 1 or 2");
     }
 
     return mp_const_none;
@@ -839,26 +845,29 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(single_tap_obj, 2, single_tap);
 STATIC mp_obj_t double_tap(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     int8_t rslt;
+    uint8_t int_line;
 
     mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
                      handler_args, args);
 
-    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
-        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+    int_line = args[ARG_int_line].u_int - 1;
+
+    if (0 == int_line || 1 == int_line) {
+        if (self->int_obj[int_line] != MP_OBJ_NULL) {
             /* set irq handler */
-            self->int_handler[args[ARG_int_line - 1].u_int].double_tap_handler = args[ARG_handler].u_obj;
+            self->int_handler[int_line].double_tap_handler = args[ARG_handler].u_obj;
             /* Enable double tap feature */
             rslt = bma423_feature_enable(BMA423_DOUBLE_TAP, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_feature_enable", rslt);
             self->int_map |= BMA423_DOUBLE_TAP_INT;
-            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            rslt = bma423_map_interrupt(int_line, self->int_map, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_map_interrupt", rslt);
         } else {
             mp_raise_ValueError("Interrupt not enabled");
         }
     } else {
-        mp_raise_ValueError("only accepts 0 or 1");
+        mp_raise_ValueError("only accepts 1 or 2");
     }
 
     return mp_const_none;
@@ -869,26 +878,29 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(double_tap_obj, 2, double_tap);
 STATIC mp_obj_t wrist_wear(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     bma423_if_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     int8_t rslt;
+    uint8_t int_line;
 
     mp_arg_val_t args[MP_ARRAY_SIZE(handler_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(handler_args),
                      handler_args, args);
 
-    if (0 == args[ARG_int_line - 1].u_int || 1 == args[ARG_int_line - 1].u_int) {
-        if (self->int_obj[args[ARG_int_line - 1].u_int] != MP_OBJ_NULL) {
+    int_line = args[ARG_int_line].u_int - 1;
+
+    if (0 == int_line || 1 == int_line) {
+        if (self->int_obj[int_line] != MP_OBJ_NULL) {
             /* set irq handler */
-            self->int_handler[args[ARG_int_line - 1].u_int].wrist_wear_handler = args[ARG_handler].u_obj;
+            self->int_handler[int_line].wrist_wear_handler = args[ARG_handler].u_obj;
             /* Enable double tap feature */
             rslt = bma423_feature_enable(BMA423_WRIST_WEAR, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_feature_enable", rslt);
             self->int_map |= BMA423_WRIST_WEAR_INT;
-            rslt = bma423_map_interrupt(args[ARG_int_line - 1].u_int, self->int_map, BMA4_ENABLE, &self->bma423);
+            rslt = bma423_map_interrupt(int_line, self->int_map, BMA4_ENABLE, &self->bma423);
             bma4_error_codes_print_result("bma423_map_interrupt", rslt);
         } else {
             mp_raise_ValueError("Interrupt not enabled");
         }
     } else {
-        mp_raise_ValueError("only accepts 0 or 1");
+        mp_raise_ValueError("only accepts 1 or 2");
     }
 
     return mp_const_none;

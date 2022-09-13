@@ -58,9 +58,9 @@ def activity_cb(event):
     elif event == 1:
         print('User is walking')
     elif event == 2:
-        print('')
-    elif event == 3:
         print('User is running')
+    elif event == 3:
+        print('Invalid activity recognized')
 
 b.activity(activity_cb)
 
@@ -80,7 +80,7 @@ b.double_tap(double_tap_cb)
 def wrist_wear_cb(event):
     print('Wrist wear received')
 
-b.wrist_wear(double_tap_cb)
+b.wrist_wear(wrist_wear_cb)
 ```
 
 #### 构造
