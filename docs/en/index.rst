@@ -1,7 +1,7 @@
 Get Started
 ============
 
-.. include:: ../../README_en.md
+.. include:: ../../README_en.rst
 
 .. toctree::
     :maxdepth: 4

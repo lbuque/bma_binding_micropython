@@ -48,11 +48,11 @@ Verification and Testing
 Future plans
 =============
 
-- [x] 步数统计
-- [x] 活动检测中断
-- [x] 单击中断
-- [x] 双击中断
-- [x] 抬腕中断
-- [ ] 引入线程对中断进行处理
-- [ ] 支持spi接口
-- [ ] 更多的传感器
+- [x] Step count
+- [x] Activity detection interrupted
+- [x] Click event interrupt
+- [x] Double click event interrupt
+- [x] Wrist lift event interrupted
+- [ ] Introduce threads to handle interrupts
+- [ ] Support spi interface
+- [ ] Support for more sensors

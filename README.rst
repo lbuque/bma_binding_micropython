@@ -27,7 +27,7 @@ esp32
 
     编译前请准备好esp-idf
 
-    关于esp32更详细的编译说，请参考https://github.com/micropython/micropython/tree/master/ports/esp32
+    关于esp32更详细的编译说，请参考 https://github.com/micropython/micropython/tree/master/ports/esp32
 
 
 .. code-block:: shell
@@ -38,7 +38,7 @@ esp32
 文档
 =====
 
-这个库的 API 文档可以在`Read the Docs <https://bma-binding-micropython.readthedocs.io/zh_CN/latest/>`_中找到。
+这个库的 API 文档可以在 `Read the Docs <https://bma-binding-micropython.readthedocs.io/zh_CN/latest/>`_ 中找到。
 
 验证与测试
 ===========

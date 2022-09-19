@@ -113,7 +113,7 @@ Methods
 
 .. method:: BMA423.step_config(enable)
 
-    使能或者失能步数统计。
+    Enable or disable step count.
 
 .. method:: BMA423.step_counter()
 
